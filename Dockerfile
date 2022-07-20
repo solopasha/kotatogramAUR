@@ -1,17 +1,17 @@
-FROM archlinux
+FROM archlinux:base-devel
 
-RUN pacman -Syu --noconfirm
-RUN pacman -S --noconfirm reflector
-RUN reflector --verbose --latest 50 --sort rate --save /etc/pacman.d/mirrorlist
-RUN pacman -S --noconfirm base-devel pacman-contrib git sudo
-
-RUN sed -i '/MAKEFLAGS=/s/^#//g' /etc/makepkg.conf
-RUN sed -i '/MAKEFLAGS/s/-j2/-j$(($(nproc)+1))/g' /etc/makepkg.conf
-
-RUN useradd -m builduser
-RUN echo 'builduser ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builduser
-
-RUN cd /home/builduser && \
+RUN pacman -Syu --noconfirm && \
+    pacman -S --noconfirm reflector && \
+    reflector --verbose --latest 10 --sort rate --save /etc/pacman.d/mirrorlist && \
+    pacman -S --noconfirm git sudo && \
+    sed \
+        -e '/MAKEFLAGS=/s/^#//g' \
+        -e '/MAKEFLAGS/s/-j2/-j$(($(nproc)+1))/g' \
+        -e '/^OPTIONS/s/!lto/lto/g' \
+        -i /etc/makepkg.conf && \
+    useradd -m builduser && \
+    echo 'builduser ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/build && \
+    cd /home/builduser && \
     su -c 'git clone https://aur.archlinux.org/yay-bin.git' builduser && \
     cd yay-bin && \
     su -c 'makepkg -sri --noconfirm' builduser && \

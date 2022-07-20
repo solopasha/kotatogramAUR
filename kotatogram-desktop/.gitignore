@@ -1,3 +1,4 @@
-kotatogram-desktop-*-full.tar.gz
+*.log
+kotatogram-desktop*
 pkg/
 src/
