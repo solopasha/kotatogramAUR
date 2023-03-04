@@ -1,14 +1,14 @@
 pkgname=kotatogram-desktop
 pkgver=1.4.9
-pkgrel=3
+pkgrel=4
 pkgdesc='Kotatogram – experimental Telegram Desktop fork'
 arch=('x86_64')
 url="https://kotatogram.github.io"
 license=('GPL3')
 _tg_owt_commit=63a934db1ed212ebf8aaaa20f0010dd7b0d7b396
-depends=('hunspell' 'ffmpeg4.4' 'hicolor-icon-theme' 'lz4' 'minizip' 'openal' 'ttf-opensans'
+depends=('hunspell' 'ffmpeg' 'hicolor-icon-theme' 'lz4' 'minizip' 'openal' 'ttf-opensans'
          'qt5-imageformats' 'qt5-svg' 'qt5-wayland' 'libdbusmenu-qt5' 'xxhash' 'kwayland' 'glibmm'
-         'rnnoise' 'jemalloc' 'abseil-cpp' 'libdrm')
+         'rnnoise' 'jemalloc' 'abseil-cpp' 'libdrm' 'openssl-1.1')
 makedepends=('cmake' 'git' 'ninja' 'python' 'range-v3' 'tl-expected' 'microsoft-gsl'
              'extra-cmake-modules' 'webkit2gtk' 'unzip' 'protobuf' 'libxrandr' 'libxcomposite'
             'libva' 'opus' 'yasm' 'libjpeg-turbo' 'pipewire' 'libxtst' 'meson')
@@ -61,7 +61,9 @@ source=("${pkgname}::git+https://github.com/kotatogram/${pkgname}.git#branch=dev
         "https://patch-diff.githubusercontent.com/raw/kotatogram/kotatogram-desktop/pull/333.patch"
         "https://patch-diff.githubusercontent.com/raw/kotatogram/kotatogram-desktop/pull/334.patch"
         "https://patch-diff.githubusercontent.com/raw/kotatogram/kotatogram-desktop/pull/335.patch"
-        "https://patch-diff.githubusercontent.com/raw/kotatogram/kotatogram-desktop/pull/337.patch")
+        "https://patch-diff.githubusercontent.com/raw/kotatogram/kotatogram-desktop/pull/337.patch"
+        "25012.patch"
+        "telegram-desktop-ffmpeg5.patch")
 sha512sums=('SKIP'
             'SKIP'
             'SKIP'
@@ -108,7 +110,9 @@ sha512sums=('SKIP'
             '51587ff4e06488be6fb765d48e1ccfe9f4c2ab4face3335063e79795fee017534a8ebdd4b5fa107ce4c969752dc293fb1e442eec7f95e8844188964ba78cb68a'
             '4732136c3d6ac285aef6b76c9e6507be847c096797f3a198fb234fd028b593c09ef00037a4daca223b32e75a7243769f5c100c825d366987bedb710b58df7048'
             '899c39dae829a82b02c5daf197642cc3dac9792b3f4514229dcae430dc2890f22309b3a3c63fe79bb7baf667a752bf6874fad2bccdf646216d22024678ad3cb4'
-            'ae9ce8bbd58abec091163a21ed23b3cdee7fd17dab4d2018c26de9c459cd9fedc66cdc0447039d57e2a3c01b86625e7e7b9ac7cd6c1c5a1a232ceb6cf374fcd4')
+            'ae9ce8bbd58abec091163a21ed23b3cdee7fd17dab4d2018c26de9c459cd9fedc66cdc0447039d57e2a3c01b86625e7e7b9ac7cd6c1c5a1a232ceb6cf374fcd4'
+            '9d79f9d877930692d7c6e361b7b5c0b231f73e5b5d38c85c7a35965fdb8f1062b7470e98b1284643e56a0208d79e8aa4191834b94dc8a840e80d17b7b262425a'
+            '9a3f3cc4f48ecb1ff9bd32ea282f51babd7b8048ca733aac3b7b2c6e04ed74e904eef0fff039b1515bcd4553a3325588f159e76d69b481977fa2b1485bb68aaf')
 
 prepare() {
     cd "${srcdir}/${pkgname}"
@@ -145,7 +149,7 @@ prepare() {
     git config submodule.Telegram/ThirdParty/jemalloc.url "${srcdir}/${pkgname}-jemalloc"
     git config submodule.Telegram/ThirdParty/kwayland.url "${srcdir}/${pkgname}-kwayland"
     git config submodule.Telegram/ThirdParty/dispatch.url "${srcdir}/${pkgname}-dispatch"
-    git submodule update
+    git -c protocol.file.allow=always submodule update
     patch -Np1 -i ../kf594.patch
     patch -Np1 -i ../block-sponsored_messages.patch
     patch -Np1 -i ../0001-Add-an-option-to-hide-messages-from-blocked-users-in.patch
@@ -154,19 +158,21 @@ prepare() {
     patch -Np1 -i ../334.patch
     patch -Np1 -i ../335.patch
     patch -Np1 -i ../337.patch
+    patch -Np1 -i ../telegram-desktop-ffmpeg5.patch
+    patch -Np1 -i ../25012.patch
     cd "${srcdir}/${pkgname}-tg_owt"
     git submodule init
     git config submodule.src/third_party/libvpx/source/libvpx.url "$srcdir"/libvpx
     git config submodule.src/third_party/libyuv.url "$srcdir"/libyuv
     git config submodule.src/third_party/pipewire.url "$srcdir"/pipewire
-    git submodule update
+    git -c protocol.file.allow=always submodule update
     patch -Np1 -i "$srcdir/101.patch"
     patch -Np1 -i "$srcdir/include.patch"
 }
 
 build() {
+    export PKG_CONFIG_PATH='/usr/lib/openssl-1.1/pkgconfig'
     # kotatogram-desktop is incompatible with the latest community/libtg_owt, so bundle an older one.
-    export PKG_CONFIG_PATH='/usr/lib/ffmpeg4.4/pkgconfig'
     cd "${srcdir}/${pkgname}-tg_owt"
     cmake \
         -B build \

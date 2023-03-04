@@ -1,0 +1,436 @@
+From 12cee5b5bdbe42a9ca6a21b28705c7b61dfe30a3 Mon Sep 17 00:00:00 2001
+From: Alexander Kernozhitsky <sh200105@mail.ru>
+Date: Thu, 1 Sep 2022 03:40:14 +0300
+Subject: [PATCH 1/4] Correct FFmpeg API usage
+
+FFmpeg docs say that you must return AVERROR_EOF from the read callback, not zero. Still, Telegram just propagates the return value from IODevice::read() call, which returns zero in case of EOF.
+
+I don't know whether this commit has any effect on the upstream build, but it fixes a bug in Debian build of Telegram, which is using FFmpeg 5.1 instead of 4.4. Still, it's also useful in the upstream, as it makes work with FFmpeg more correct.
+---
+ Telegram/SourceFiles/media/clip/media_clip_ffmpeg.cpp | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/Telegram/SourceFiles/media/clip/media_clip_ffmpeg.cpp b/Telegram/SourceFiles/media/clip/media_clip_ffmpeg.cpp
+index cee45b923eca1..619ff9b284f67 100644
+--- a/Telegram/SourceFiles/media/clip/media_clip_ffmpeg.cpp
++++ b/Telegram/SourceFiles/media/clip/media_clip_ffmpeg.cpp
+@@ -482,7 +482,13 @@ FFMpegReaderImplementation::PacketResult FFMpegReaderImplementation::readAndProc
+ 
+ int FFMpegReaderImplementation::_read(void *opaque, uint8_t *buf, int buf_size) {
+ 	FFMpegReaderImplementation *l = reinterpret_cast<FFMpegReaderImplementation*>(opaque);
+-	return int(l->_device->read((char*)(buf), buf_size));
++	FFMpegReaderImplementation *l = reinterpret_cast<FFMpegReaderImplementation*>(opaque);
++	int ret = l->_device->read((char*)(buf), buf_size);
++	switch (ret) {
++	case -1: return AVERROR_EXTERNAL;
++	case 0: return AVERROR_EOF;
++	default: return ret;
++	}
+ }
+ 
+ int64_t FFMpegReaderImplementation::_seek(void *opaque, int64_t offset, int whence) {
+
+From fa34faf58757eccfcfce4c5afdee262a86aff9b3 Mon Sep 17 00:00:00 2001
+From: Alexander Kernozhitsky <sh200105@mail.ru>
+Date: Thu, 1 Sep 2022 14:16:25 +0300
+Subject: [PATCH 2/4] Remove duplicate line
+
+Co-authored-by: darkkeks <darkkeks@rambler.ru>
+---
+ Telegram/SourceFiles/media/clip/media_clip_ffmpeg.cpp | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/Telegram/SourceFiles/media/clip/media_clip_ffmpeg.cpp b/Telegram/SourceFiles/media/clip/media_clip_ffmpeg.cpp
+index 619ff9b284f67..8fe01a2bc547d 100644
+--- a/Telegram/SourceFiles/media/clip/media_clip_ffmpeg.cpp
++++ b/Telegram/SourceFiles/media/clip/media_clip_ffmpeg.cpp
+@@ -481,7 +481,6 @@ FFMpegReaderImplementation::PacketResult FFMpegReaderImplementation::readAndProc
+ }
+ 
+ int FFMpegReaderImplementation::_read(void *opaque, uint8_t *buf, int buf_size) {
+-	FFMpegReaderImplementation *l = reinterpret_cast<FFMpegReaderImplementation*>(opaque);
+ 	FFMpegReaderImplementation *l = reinterpret_cast<FFMpegReaderImplementation*>(opaque);
+ 	int ret = l->_device->read((char*)(buf), buf_size);
+ 	switch (ret) {
+
+From 94fae819d3ff63d02ad545e958f21d28734835c3 Mon Sep 17 00:00:00 2001
+From: Alexander Kernozhitsky <sh200105@mail.ru>
+Date: Fri, 2 Sep 2022 01:27:25 +0300
+Subject: [PATCH 3/4] Patch the remaining uses or FFmpeg APIs
+
+---
+ .../media/audio/media_audio_capture.cpp        |  2 +-
+ .../media/audio/media_audio_ffmpeg_loader.cpp  | 11 ++++++++---
+ .../media/streaming/media_streaming_file.cpp   | 18 +++++++++---------
+ .../media/streaming/media_streaming_file.h     |  4 ++--
+ 5 files changed, 23 insertions(+), 18 deletions(-)
+
+diff --git a/Telegram/SourceFiles/media/audio/media_audio_capture.cpp b/Telegram/SourceFiles/media/audio/media_audio_capture.cpp
+index 8618603234944..928582f8eb0d3 100644
+--- a/Telegram/SourceFiles/media/audio/media_audio_capture.cpp
++++ b/Telegram/SourceFiles/media/audio/media_audio_capture.cpp
+@@ -181,7 +181,7 @@ struct Instance::Inner::Private {
+ 
+ 		int32 nbytes = qMin(l->data.size() - l->dataPos, int32(buf_size));
+ 		if (nbytes <= 0) {
+-			return 0;
++			return AVERROR_EOF;
+ 		}
+ 
+ 		memcpy(buf, l->data.constData() + l->dataPos, nbytes);
+diff --git a/Telegram/SourceFiles/media/audio/media_audio_ffmpeg_loader.cpp b/Telegram/SourceFiles/media/audio/media_audio_ffmpeg_loader.cpp
+index 7122e65e1eeb9..9ce9a4d7e33ac 100644
+--- a/Telegram/SourceFiles/media/audio/media_audio_ffmpeg_loader.cpp
++++ b/Telegram/SourceFiles/media/audio/media_audio_ffmpeg_loader.cpp
+@@ -105,7 +105,7 @@ int AbstractFFMpegLoader::_read_data(void *opaque, uint8_t *buf, int buf_size) {
+ 
+ 	auto nbytes = qMin(l->_data.size() - l->_dataPos, int32(buf_size));
+ 	if (nbytes <= 0) {
+-		return 0;
++		return AVERROR_EOF;
+ 	}
+ 
+ 	memcpy(buf, l->_data.constData() + l->_dataPos, nbytes);
+@@ -138,7 +138,7 @@ int AbstractFFMpegLoader::_read_bytes(void *opaque, uint8_t *buf, int buf_size)
+ 
+ 	auto nbytes = qMin(static_cast<int>(l->_bytes.size()) - l->_dataPos, buf_size);
+ 	if (nbytes <= 0) {
+-		return 0;
++		return AVERROR_EOF;
+ 	}
+ 
+ 	memcpy(buf, l->_bytes.data() + l->_dataPos, nbytes);
+@@ -169,7 +169,12 @@ int64_t AbstractFFMpegLoader::_seek_bytes(void *opaque, int64_t offset, int when
+ 
+ int AbstractFFMpegLoader::_read_file(void *opaque, uint8_t *buf, int buf_size) {
+ 	auto l = reinterpret_cast<AbstractFFMpegLoader *>(opaque);
+-	return int(l->_f.read((char *)(buf), buf_size));
++	int ret = l->_f.read((char *)(buf), buf_size);
++	switch (ret) {
++	case -1: return AVERROR_EXTERNAL;
++	case 0: return AVERROR_EOF;
++	default: return ret;
++	}
+ }
+ 
+ int64_t AbstractFFMpegLoader::_seek_file(void *opaque, int64_t offset, int whence) {
+diff --git a/Telegram/SourceFiles/media/streaming/media_streaming_file.cpp b/Telegram/SourceFiles/media/streaming/media_streaming_file.cpp
+index 1fd884e212104..a616400233c0e 100644
+--- a/Telegram/SourceFiles/media/streaming/media_streaming_file.cpp
++++ b/Telegram/SourceFiles/media/streaming/media_streaming_file.cpp
+@@ -44,12 +44,12 @@ File::Context::Context(
+ 
+ File::Context::~Context() = default;
+ 
+-int File::Context::Read(void *opaque, uint8_t *buffer, int bufferSize) {
++int File::Context::_read(void *opaque, uint8_t *buffer, int bufferSize) {
+ 	return static_cast<Context*>(opaque)->read(
+ 		bytes::make_span(buffer, bufferSize));
+ }
+ 
+-int64_t File::Context::Seek(void *opaque, int64_t offset, int whence) {
++int64_t File::Context::_seek(void *opaque, int64_t offset, int whence) {
+ 	return static_cast<Context*>(opaque)->seek(offset, whence);
+ }
+ 
+@@ -59,13 +59,13 @@ int File::Context::read(bytes::span buffer) {
+ 	const auto amount = std::min(_size - _offset, int64(buffer.size()));
+ 
+ 	if (unroll()) {
+-		return -1;
++		return AVERROR_EXTERNAL;
+ 	} else if (amount > kMaxSingleReadAmount) {
+ 		LOG(("Streaming Error: Read callback asked for too much data: %1"
+ 			).arg(amount));
+-		return -1;
++		return AVERROR_EXTERNAL;
+ 	} else if (!amount) {
+-		return amount;
++		return AVERROR_EOF;
+ 	}
+ 
+ 	buffer = buffer.subspan(0, amount);
+@@ -87,10 +87,10 @@ int File::Context::read(bytes::span buffer) {
+ 		}
+ 		_semaphore.acquire();
+ 		if (_interrupted) {
+-			return -1;
++			return AVERROR_EXTERNAL;
+ 		} else if (const auto error = _reader->streamingError()) {
+ 			fail(*error);
+-			return -1;
++			return AVERROR_EXTERNAL;
+ 		}
+ 	}
+ 
+@@ -276,9 +276,9 @@ void File::Context::start(crl::time position, bool hwAllow) {
+ 	}
+ 	auto format = FFmpeg::MakeFormatPointer(
+ 		static_cast<void *>(this),
+-		&Context::Read,
++		&Context::_read,
+ 		nullptr,
+-		&Context::Seek);
++		&Context::_seek);
+ 	if (!format) {
+ 		return fail(Error::OpenFailed);
+ 	}
+diff --git a/Telegram/SourceFiles/media/streaming/media_streaming_file.h b/Telegram/SourceFiles/media/streaming/media_streaming_file.h
+index 8ffea9430966f..ab34ef3e8745c 100644
+--- a/Telegram/SourceFiles/media/streaming/media_streaming_file.h
++++ b/Telegram/SourceFiles/media/streaming/media_streaming_file.h
+@@ -62,8 +62,8 @@ class File final {
+ 			Allowed,
+ 			Disallowed,
+ 		};
+-		static int Read(void *opaque, uint8_t *buffer, int bufferSize);
+-		static int64_t Seek(void *opaque, int64_t offset, int whence);
++		static int _read(void *opaque, uint8_t *buffer, int bufferSize);
++		static int64_t _seek(void *opaque, int64_t offset, int whence);
+ 
+ 		[[nodiscard]] int read(bytes::span buffer);
+ 		[[nodiscard]] int64_t seek(int64_t offset, int whence);
+
+From 322d493ae64830ce3e8d59f0dfabbf05277363e2 Mon Sep 17 00:00:00 2001
+From: Alexander Kernozhitsky <sh200105@mail.ru>
+Date: Sat, 3 Sep 2022 18:07:11 +0300
+Subject: [PATCH 4/4] Fix code style
+
+---
+ .../media/audio/media_audio_capture.cpp        |  8 ++++----
+ .../media/audio/media_audio_ffmpeg_loader.cpp  | 18 +++++++++---------
+ .../media/audio/media_audio_ffmpeg_loader.h    | 12 ++++++------
+ .../media/clip/media_clip_ffmpeg.cpp           |  6 +++---
+ .../SourceFiles/media/clip/media_clip_ffmpeg.h |  4 ++--
+ .../media/streaming/media_streaming_file.cpp   |  8 ++++----
+ .../media/streaming/media_streaming_file.h     |  4 ++--
+ 8 files changed, 32 insertions(+), 32 deletions(-)
+
+diff --git a/Telegram/SourceFiles/media/audio/media_audio_capture.cpp b/Telegram/SourceFiles/media/audio/media_audio_capture.cpp
+index 928582f8eb0d3..b1a12dd04ab5b 100644
+--- a/Telegram/SourceFiles/media/audio/media_audio_capture.cpp
++++ b/Telegram/SourceFiles/media/audio/media_audio_capture.cpp
+@@ -176,7 +176,7 @@ struct Instance::Inner::Private {
+ 	uint16 waveformPeak = 0;
+ 	QVector<uchar> waveform;
+ 
+-	static int _read_data(void *opaque, uint8_t *buf, int buf_size) {
++	static int ReadData(void *opaque, uint8_t *buf, int buf_size) {
+ 		auto l = reinterpret_cast<Private*>(opaque);
+ 
+ 		int32 nbytes = qMin(l->data.size() - l->dataPos, int32(buf_size));
+@@ -189,7 +189,7 @@ struct Instance::Inner::Private {
+ 		return nbytes;
+ 	}
+ 
+-	static int _write_data(void *opaque, uint8_t *buf, int buf_size) {
++	static int WriteData(void *opaque, uint8_t *buf, int buf_size) {
+ 		auto l = reinterpret_cast<Private*>(opaque);
+ 
+ 		if (buf_size <= 0) return 0;
+@@ -199,7 +199,7 @@ struct Instance::Inner::Private {
+ 		return buf_size;
+ 	}
+ 
+-	static int64_t _seek_data(void *opaque, int64_t offset, int whence) {
++	static int64_t SeekData(void *opaque, int64_t offset, int whence) {
+ 		auto l = reinterpret_cast<Private*>(opaque);
+ 
+ 		int32 newPos = -1;
+@@ -260,7 +260,7 @@ void Instance::Inner::start(Fn<void(Update)> updated, Fn<void()> error) {
+ 
+ 	d->ioBuffer = (uchar*)av_malloc(FFmpeg::kAVBlockSize);
+ 
+-	d->ioContext = avio_alloc_context(d->ioBuffer, FFmpeg::kAVBlockSize, 1, static_cast<void*>(d.get()), &Private::_read_data, &Private::_write_data, &Private::_seek_data);
++	d->ioContext = avio_alloc_context(d->ioBuffer, FFmpeg::kAVBlockSize, 1, static_cast<void*>(d.get()), &Private::ReadData, &Private::WriteData, &Private::SeekData);
+ 	int res = 0;
+ 	char err[AV_ERROR_MAX_STRING_SIZE] = { 0 };
+ 	const AVOutputFormat *fmt = nullptr;
+diff --git a/Telegram/SourceFiles/media/audio/media_audio_ffmpeg_loader.cpp b/Telegram/SourceFiles/media/audio/media_audio_ffmpeg_loader.cpp
+index 9ce9a4d7e33ac..f79027ccdbdd9 100644
+--- a/Telegram/SourceFiles/media/audio/media_audio_ffmpeg_loader.cpp
++++ b/Telegram/SourceFiles/media/audio/media_audio_ffmpeg_loader.cpp
+@@ -38,11 +38,11 @@ bool AbstractFFMpegLoader::open(crl::time positionMs) {
+ 
+ 	ioBuffer = (uchar *)av_malloc(FFmpeg::kAVBlockSize);
+ 	if (!_data.isEmpty()) {
+-		ioContext = avio_alloc_context(ioBuffer, FFmpeg::kAVBlockSize, 0, reinterpret_cast<void *>(this), &AbstractFFMpegLoader::_read_data, 0, &AbstractFFMpegLoader::_seek_data);
++		ioContext = avio_alloc_context(ioBuffer, FFmpeg::kAVBlockSize, 0, reinterpret_cast<void *>(this), &AbstractFFMpegLoader::ReadData, 0, &AbstractFFMpegLoader::SeekData);
+ 	} else if (!_bytes.empty()) {
+-		ioContext = avio_alloc_context(ioBuffer, FFmpeg::kAVBlockSize, 0, reinterpret_cast<void *>(this), &AbstractFFMpegLoader::_read_bytes, 0, &AbstractFFMpegLoader::_seek_bytes);
++		ioContext = avio_alloc_context(ioBuffer, FFmpeg::kAVBlockSize, 0, reinterpret_cast<void *>(this), &AbstractFFMpegLoader::ReadBytes, 0, &AbstractFFMpegLoader::SeekBytes);
+ 	} else {
+-		ioContext = avio_alloc_context(ioBuffer, FFmpeg::kAVBlockSize, 0, reinterpret_cast<void *>(this), &AbstractFFMpegLoader::_read_file, 0, &AbstractFFMpegLoader::_seek_file);
++		ioContext = avio_alloc_context(ioBuffer, FFmpeg::kAVBlockSize, 0, reinterpret_cast<void *>(this), &AbstractFFMpegLoader::ReadFile, 0, &AbstractFFMpegLoader::SeekFile);
+ 	}
+ 	fmtContext = avformat_alloc_context();
+ 	if (!fmtContext) {
+@@ -100,7 +100,7 @@ AbstractFFMpegLoader::~AbstractFFMpegLoader() {
+ 	if (fmtContext) avformat_free_context(fmtContext);
+ }
+ 
+-int AbstractFFMpegLoader::_read_data(void *opaque, uint8_t *buf, int buf_size) {
++int AbstractFFMpegLoader::ReadData(void *opaque, uint8_t *buf, int buf_size) {
+ 	auto l = reinterpret_cast<AbstractFFMpegLoader *>(opaque);
+ 
+ 	auto nbytes = qMin(l->_data.size() - l->_dataPos, int32(buf_size));
+@@ -113,7 +113,7 @@ int AbstractFFMpegLoader::_read_data(void *opaque, uint8_t *buf, int buf_size) {
+ 	return nbytes;
+ }
+ 
+-int64_t AbstractFFMpegLoader::_seek_data(void *opaque, int64_t offset, int whence) {
++int64_t AbstractFFMpegLoader::SeekData(void *opaque, int64_t offset, int whence) {
+ 	auto l = reinterpret_cast<AbstractFFMpegLoader *>(opaque);
+ 
+ 	int32 newPos = -1;
+@@ -133,7 +133,7 @@ int64_t AbstractFFMpegLoader::_seek_data(void *opaque, int64_t offset, int whenc
+ 	return l->_dataPos;
+ }
+ 
+-int AbstractFFMpegLoader::_read_bytes(void *opaque, uint8_t *buf, int buf_size) {
++int AbstractFFMpegLoader::ReadBytes(void *opaque, uint8_t *buf, int buf_size) {
+ 	auto l = reinterpret_cast<AbstractFFMpegLoader *>(opaque);
+ 
+ 	auto nbytes = qMin(static_cast<int>(l->_bytes.size()) - l->_dataPos, buf_size);
+@@ -146,7 +146,7 @@ int AbstractFFMpegLoader::_read_bytes(void *opaque, uint8_t *buf, int buf_size)
+ 	return nbytes;
+ }
+ 
+-int64_t AbstractFFMpegLoader::_seek_bytes(void *opaque, int64_t offset, int whence) {
++int64_t AbstractFFMpegLoader::SeekBytes(void *opaque, int64_t offset, int whence) {
+ 	auto l = reinterpret_cast<AbstractFFMpegLoader *>(opaque);
+ 
+ 	int32 newPos = -1;
+@@ -167,7 +167,7 @@ int64_t AbstractFFMpegLoader::_seek_bytes(void *opaque, int64_t offset, int when
+ 	return l->_dataPos;
+ }
+ 
+-int AbstractFFMpegLoader::_read_file(void *opaque, uint8_t *buf, int buf_size) {
++int AbstractFFMpegLoader::ReadFile(void *opaque, uint8_t *buf, int buf_size) {
+ 	auto l = reinterpret_cast<AbstractFFMpegLoader *>(opaque);
+ 	int ret = l->_f.read((char *)(buf), buf_size);
+ 	switch (ret) {
+@@ -177,7 +177,7 @@ int AbstractFFMpegLoader::_read_file(void *opaque, uint8_t *buf, int buf_size) {
+ 	}
+ }
+ 
+-int64_t AbstractFFMpegLoader::_seek_file(void *opaque, int64_t offset, int whence) {
++int64_t AbstractFFMpegLoader::SeekFile(void *opaque, int64_t offset, int whence) {
+ 	auto l = reinterpret_cast<AbstractFFMpegLoader *>(opaque);
+ 
+ 	switch (whence) {
+diff --git a/Telegram/SourceFiles/media/audio/media_audio_ffmpeg_loader.h b/Telegram/SourceFiles/media/audio/media_audio_ffmpeg_loader.h
+index 58c97fe49bb0c..2dae6b4734e47 100644
+--- a/Telegram/SourceFiles/media/audio/media_audio_ffmpeg_loader.h
++++ b/Telegram/SourceFiles/media/audio/media_audio_ffmpeg_loader.h
+@@ -70,12 +70,12 @@ class AbstractFFMpegLoader : public AudioPlayerLoader {
+ 	bool _opened = false;
+ 
+ private:
+-	static int _read_data(void *opaque, uint8_t *buf, int buf_size);
+-	static int64_t _seek_data(void *opaque, int64_t offset, int whence);
+-	static int _read_bytes(void *opaque, uint8_t *buf, int buf_size);
+-	static int64_t _seek_bytes(void *opaque, int64_t offset, int whence);
+-	static int _read_file(void *opaque, uint8_t *buf, int buf_size);
+-	static int64_t _seek_file(void *opaque, int64_t offset, int whence);
++	static int ReadData(void *opaque, uint8_t *buf, int buf_size);
++	static int64_t SeekData(void *opaque, int64_t offset, int whence);
++	static int ReadBytes(void *opaque, uint8_t *buf, int buf_size);
++	static int64_t SeekBytes(void *opaque, int64_t offset, int whence);
++	static int ReadFile(void *opaque, uint8_t *buf, int buf_size);
++	static int64_t SeekFile(void *opaque, int64_t offset, int whence);
+ 
+ };
+ 
+diff --git a/Telegram/SourceFiles/media/clip/media_clip_ffmpeg.cpp b/Telegram/SourceFiles/media/clip/media_clip_ffmpeg.cpp
+index 8fe01a2bc547d..907ae2eb83481 100644
+--- a/Telegram/SourceFiles/media/clip/media_clip_ffmpeg.cpp
++++ b/Telegram/SourceFiles/media/clip/media_clip_ffmpeg.cpp
+@@ -283,7 +283,7 @@ bool FFMpegReaderImplementation::start(Mode mode, crl::time &positionMs) {
+ 		return false;
+ 	}
+ 	_ioBuffer = (uchar*)av_malloc(FFmpeg::kAVBlockSize);
+-	_ioContext = avio_alloc_context(_ioBuffer, FFmpeg::kAVBlockSize, 0, static_cast<void*>(this), &FFMpegReaderImplementation::_read, nullptr, &FFMpegReaderImplementation::_seek);
++	_ioContext = avio_alloc_context(_ioBuffer, FFmpeg::kAVBlockSize, 0, static_cast<void*>(this), &FFMpegReaderImplementation::Read, nullptr, &FFMpegReaderImplementation::Seek);
+ 	_fmtContext = avformat_alloc_context();
+ 	if (!_fmtContext) {
+ 		LOG(("Gif Error: Unable to avformat_alloc_context %1").arg(logData()));
+@@ -480,7 +480,7 @@ FFMpegReaderImplementation::PacketResult FFMpegReaderImplementation::readAndProc
+ 	return result;
+ }
+ 
+-int FFMpegReaderImplementation::_read(void *opaque, uint8_t *buf, int buf_size) {
++int FFMpegReaderImplementation::Read(void *opaque, uint8_t *buf, int buf_size) {
+ 	FFMpegReaderImplementation *l = reinterpret_cast<FFMpegReaderImplementation*>(opaque);
+ 	int ret = l->_device->read((char*)(buf), buf_size);
+ 	switch (ret) {
+@@ -490,7 +490,7 @@ int FFMpegReaderImplementation::_read(void *opaque, uint8_t *buf, int buf_size)
+ 	}
+ }
+ 
+-int64_t FFMpegReaderImplementation::_seek(void *opaque, int64_t offset, int whence) {
++int64_t FFMpegReaderImplementation::Seek(void *opaque, int64_t offset, int whence) {
+ 	FFMpegReaderImplementation *l = reinterpret_cast<FFMpegReaderImplementation*>(opaque);
+ 
+ 	switch (whence) {
+diff --git a/Telegram/SourceFiles/media/clip/media_clip_ffmpeg.h b/Telegram/SourceFiles/media/clip/media_clip_ffmpeg.h
+index b38fa0381479f..2fbea399c2694 100644
+--- a/Telegram/SourceFiles/media/clip/media_clip_ffmpeg.h
++++ b/Telegram/SourceFiles/media/clip/media_clip_ffmpeg.h
+@@ -76,8 +76,8 @@ class FFMpegReaderImplementation : public ReaderImplementation {
+ 		return (_rotation == Rotation::Degrees90) || (_rotation == Rotation::Degrees270);
+ 	}
+ 
+-	static int _read(void *opaque, uint8_t *buf, int buf_size);
+-	static int64_t _seek(void *opaque, int64_t offset, int whence);
++	static int Read(void *opaque, uint8_t *buf, int buf_size);
++	static int64_t Seek(void *opaque, int64_t offset, int whence);
+ 
+ 	Mode _mode = Mode::Silent;
+ 
+diff --git a/Telegram/SourceFiles/media/streaming/media_streaming_file.cpp b/Telegram/SourceFiles/media/streaming/media_streaming_file.cpp
+index a616400233c0e..508f87210a02f 100644
+--- a/Telegram/SourceFiles/media/streaming/media_streaming_file.cpp
++++ b/Telegram/SourceFiles/media/streaming/media_streaming_file.cpp
+@@ -44,12 +44,12 @@ File::Context::Context(
+ 
+ File::Context::~Context() = default;
+ 
+-int File::Context::_read(void *opaque, uint8_t *buffer, int bufferSize) {
++int File::Context::Read(void *opaque, uint8_t *buffer, int bufferSize) {
+ 	return static_cast<Context*>(opaque)->read(
+ 		bytes::make_span(buffer, bufferSize));
+ }
+ 
+-int64_t File::Context::_seek(void *opaque, int64_t offset, int whence) {
++int64_t File::Context::Seek(void *opaque, int64_t offset, int whence) {
+ 	return static_cast<Context*>(opaque)->seek(offset, whence);
+ }
+ 
+@@ -276,9 +276,9 @@ void File::Context::start(crl::time position, bool hwAllow) {
+ 	}
+ 	auto format = FFmpeg::MakeFormatPointer(
+ 		static_cast<void *>(this),
+-		&Context::_read,
++		&Context::Read,
+ 		nullptr,
+-		&Context::_seek);
++		&Context::Seek);
+ 	if (!format) {
+ 		return fail(Error::OpenFailed);
+ 	}
+diff --git a/Telegram/SourceFiles/media/streaming/media_streaming_file.h b/Telegram/SourceFiles/media/streaming/media_streaming_file.h
+index ab34ef3e8745c..8ffea9430966f 100644
+--- a/Telegram/SourceFiles/media/streaming/media_streaming_file.h
++++ b/Telegram/SourceFiles/media/streaming/media_streaming_file.h
+@@ -62,8 +62,8 @@ class File final {
+ 			Allowed,
+ 			Disallowed,
+ 		};
+-		static int _read(void *opaque, uint8_t *buffer, int bufferSize);
+-		static int64_t _seek(void *opaque, int64_t offset, int whence);
++		static int Read(void *opaque, uint8_t *buffer, int bufferSize);
++		static int64_t Seek(void *opaque, int64_t offset, int whence);
+ 
+ 		[[nodiscard]] int read(bytes::span buffer);
+ 		[[nodiscard]] int64_t seek(int64_t offset, int whence);
