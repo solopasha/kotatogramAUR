@@ -1,0 +1,21 @@
+From 82c4921045c440b727c38e464f3a0539708423ff Mon Sep 17 00:00:00 2001
+From: Joe Kappus <joe@wt.gd>
+Date: Sat, 13 Aug 2022 17:14:42 -0400
+Subject: [PATCH] Fix build with GCC12.
+
+---
+ tgcalls/utils/gzip.h | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/tgcalls/utils/gzip.h b/tgcalls/utils/gzip.h
+index a3f3ea21..1746cd98 100644
+--- a/tgcalls/utils/gzip.h
++++ b/tgcalls/utils/gzip.h
+@@ -2,6 +2,7 @@
+ #define TGCALLS_UTILS_GZIP_H
+ 
+ #include <absl/types/optional.h>
++#include <cstdint>
+ #include <vector>
+ 
+ namespace tgcalls {
