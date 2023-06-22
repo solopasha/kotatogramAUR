@@ -1,6 +1,6 @@
 pkgname=kotatogram-desktop
 pkgver=1.4.9
-pkgrel=6
+pkgrel=7
 pkgdesc='Kotatogram – experimental Telegram Desktop fork'
 arch=('x86_64')
 url="https://kotatogram.github.io"
@@ -170,7 +170,6 @@ build() {
         -DCMAKE_INSTALL_PREFIX="/usr" \
         -DCMAKE_BUILD_TYPE=Release \
         -Dtg_owt_DIR="${srcdir}/${pkgname}-tg_owt/build" \
-        -DDESKTOP_APP_QT6=OFF \
         -DTDESKTOP_API_TEST=ON
     cmake --build build
 }
